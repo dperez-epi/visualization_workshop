@@ -1,0 +1,154 @@
+---
+title: "ggplot_example"
+author: "Daniel Perez"
+date: "7/15/2023"
+output: html_document
+---
+
+```{r Libraries}
+
+library(ipumsr)
+library(tidyverse)
+library(here)
+
+library(janitor)
+library(labelled)
+library(readxl)
+library(openxlsx)
+
+```
+
+ACS extract was created via https://usa.ipums.org/usa/ from the ACS 5-year sample 2017-2021. 
+
+Variables: 
+ [1] "YEAR"      "MULTYEAR"  "SAMPLE"    "SERIAL"    "CBSERIAL"  "HHWT"      "CLUSTER"   "STATEFIP" 
+ [9] "COUNTYFIP" "STRATA"    "GQ"        "PERNUM"    "PERWT"     "SEX"       "AGE"       "RACE"     
+[17] "RACED"     "HISPAN"    "HISPAND"   "CITIZEN"   "EMPSTAT"   "EMPSTATD"  "LABFORCE"  "CLASSWKR" 
+[25] "CLASSWKRD"
+
+
+```{r Load data}
+
+ddi <- read_ipums_ddi(here("input/usa_00018.xml"))
+
+acs_raw <- read_ipums_micro(ddi)
+
+#Download county names from https://usa.ipums.org/usa/resources/volii/ipums_usa_identified_counties.xlsx
+url <- 'https://usa.ipums.org/usa/resources/volii/ipums_usa_identified_counties.xlsx'
+destfile <- here('input/ipums_usa_identified_counties.xlsx')
+download.file(url, destfile, method = 'wget')
+
+county_data <- read_excel(path = here('input/ipums_usa_identified_counties.xlsx'), range = 'A2:E591') %>% 
+  #Use janitor library for to clean variable names. Next, rename state and county variables
+  clean_names() %>% rename(state = x1, county=x2) %>% 
+  #remove extraneous variable
+  select(-countyicp) %>% 
+  #convert fips codes to numeric to merge with ACS
+  mutate(statefip = as.numeric(statefip),
+         countyfip = as.numeric(countyfip))
+
+### CLEAN ACS DATA ###
+
+acs_clean <- acs_raw %>%
+  #make variables lower case for convenience
+  janitor::clean_names() %>% 
+  #keep working age pop
+  filter(age>=16) %>% 
+  #Create unemployment variable
+  mutate(unemp = ifelse(empstat == 2, yes=1,
+                        ifelse(empstat==1, yes= 0,
+                               ifelse(empstat %in% c(0,3), NA, NA)))) %>% 
+  set_value_labels(unemp = c('Employed'= 0, 'Unemployed'=1)) %>% 
+  
+  #Simplified race/ethnicity variable
+  mutate(wbhao = case_when(race==1 ~ 1,
+                           race==2 ~ 2,
+                           hispan %in% c(1:4) ~ 3,
+                           race %in% c(4:6) ~ 4,
+                           race %in% c(3, 7:9) ~ 5)) %>% 
+  set_value_labels(wbhao = c('White'= 1, 'Black' = 2, 'Hispanic' = 3, 'AAPI' = 4, 'Other' = 5)) %>% 
+
+  
+  #Merge county and state names onto acs
+  left_join(county_data, by=c('statefip', 'countyfip')) %>% 
+  relocate(state, county, .after = countyfip)
+
+
+
+```
+
+
+```{r Analysis}
+
+#Benchmarked to https://data.census.gov/table?q=employment&g=010XX00US$0400000&y=2021&d=ACS+5-Year+Estimates+Subject+Tables&tid=ACSST5Y2021.S2301&moe=true
+
+state_unemp <- acs_clean %>% 
+  # unemployment by state
+  mutate(state = to_factor(statefip)) %>% 
+  summarize(urate = weighted.mean(unemp, w = perwt, na.rm=TRUE),
+            n = n(),
+            wgt = sum(perwt),
+            .by = c(state))
+
+### For Tableau/GGplot exercise
+
+# unemployment by state and county
+state_county_unemp <- acs_clean %>% 
+  summarize(urate = weighted.mean(unemp, w = perwt, na.rm=TRUE),
+            n = n(),
+            wgt = sum(perwt),
+            .by = c(state, county))
+
+# unemployment by state, county, and race
+state_county_unemp_wbhao <- acs_clean %>% 
+  mutate(wbhao = to_factor(wbhao)) %>% 
+  summarize(urate = weighted.mean(unemp, w = perwt, na.rm=TRUE),
+            n = n(),
+            wgt = sum(perwt),
+            .by = c(state, county, wbhao)) %>% 
+  
+  #suppress any urates with less than 150 observations
+  mutate(urate = replace(urate, n<150, NA)) %>% 
+  
+  #pivot wide by race
+  pivot_wider(id_cols = c(state, county), names_from = wbhao, values_from = urate, names_prefix = 'urate_')
+  
+
+```
+
+```{r Excel workbook}
+
+wb <- createWorkbook()
+
+#Create number formats
+pct = createStyle(numFmt = '0.0%')
+acct = createStyle(numFmt = '#,#0' )
+
+#create headerstyle
+hs1 <- createStyle(fgFill = "#bfbfbf", halign = "CENTER", textDecoration = "Bold",
+                   border = "Bottom", fontColour = "black")
+
+addWorksheet(wb, sheetName = 'State urates')
+addWorksheet(wb, sheetName = 'County urates')
+addWorksheet(wb, sheetName = 'County urates, by race')
+
+writeData(wb, headerStyle = hs1, state_unemp, sheet = 'State urates', startCol = 1, startRow = 1, colNames = TRUE)
+writeData(wb, headerStyle = hs1, state_county_unemp, sheet = 'County urates', startCol = 1, startRow = 1, colNames = TRUE)
+writeData(wb, headerStyle = hs1, state_county_unemp_wbhao, sheet = 'County urates, by race', startCol = 1, startRow = 1, colNames = TRUE)
+
+addStyle(wb, 'State urates', style=pct, cols=c(2), rows=2:(nrow(state_unemp)), gridExpand=TRUE)
+addStyle(wb, 'County urates', style=pct, cols=c(3), rows=2:(nrow(state_county_unemp)), gridExpand=TRUE)
+addStyle(wb, 'County urates, by race', style=pct, cols=c(3:7), rows=2:(nrow(state_county_unemp_wbhao)), gridExpand=TRUE)
+#Accounting format
+addStyle(wb, 'State urates', style=acct, cols=c(3:4), rows=2:(nrow(state_unemp)), gridExpand=TRUE)
+addStyle(wb, 'County urates', style=acct, cols=c(4:5), rows=2:(nrow(state_county_unemp)), gridExpand=TRUE)
+
+
+saveWorkbook(wb, here(paste0("output/acs_sample_data.xlsx")), overwrite = TRUE)
+
+```
+
+
+
+
+
