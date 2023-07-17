@@ -2,5 +2,5 @@
 .Rhistory
 .RData
 .Ruserdata
-input/usa*
-input/ipums*
+input/*.gz
+input/*.xlsx
