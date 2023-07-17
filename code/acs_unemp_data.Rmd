@@ -1,5 +1,5 @@
 ---
-title: "ggplot_example"
+title: "Tabulate county unemployment data"
 author: "Daniel Perez"
 date: "7/15/2023"
 output: html_document
