@@ -4,3 +4,6 @@
 .Ruserdata
 input/*.gz
 input/*.xlsx
+input/*.xml
+code/acs_unemp_data.Rmd
+code/cps_unemp_data.Rmd
