@@ -27,7 +27,22 @@ Variables:
 [25] "CLASSWKRD"
 
 
+```{r try new IPUMS ACS API}
+#Register for IPUMS ACS key https://tech.popdata.org/ipumsr/articles/ipums-api.html
+acs_key <- Sys.getenv("IPUMS_API_KEY")
+
+#5-year samples are paste0('us',year,'c'), like us2021c for 2017-2021 sample.
+usa_ext_def <- define_extract_usa(
+  description = "USA extract test",
+  samples = c('us2021c'),
+  
+)
+
+```
+
+
 ```{r Load data}
+
 
 ddi <- read_ipums_ddi(here("input/usa_00018.xml"))
 

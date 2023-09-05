@@ -23,7 +23,6 @@ system(paste0('wget -U "" -N --progress=bar:force --header="Accept-Encoding: gzi
 unzip(here("input/laucntycur14.zip"), exdir = here("input"))
 
 
-
 #### Read and clean LAUS excel file ####
 laus_county <- read_excel(here('input/laucntycur14.xlsx'), range = 'A5:I45086') %>% 
   clean_names() %>% 
